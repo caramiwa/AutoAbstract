@@ -30,7 +30,3 @@ function onOpen() {
 //    .addItem('Extract Bids per Bidder', 'extractAllBidsPerBidder')
       .addToUi();
 }
-
-function generateLCBDocuments() {
-  SpreadsheetApp.getUi().alert('Function is found and running!');
-}
