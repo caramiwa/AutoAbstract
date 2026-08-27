@@ -147,9 +147,38 @@ function insertLCBTableAtPlaceholder(body, data) {
 
   body.removeChild(parent);
 
-  const tableData = data.map(row =>
-    row.map(value => value === null || value === undefined ? '' : String(value))
+  const tableData = data.map((row, rowIndex) =>
+    row.map((value, columnIndex) =>
+      formatLCBDocumentValue(value, columnIndex, rowIndex)
+    )
   );
 
   body.insertTable(index, tableData);
+}
+
+function formatLCBDocumentValue(value, columnIndex, rowIndex) {
+  if (value === null || value === undefined) return '';
+
+  // Header row remains exactly as supplied by the bidder sheet.
+  if (rowIndex === 0) return String(value);
+
+  // Column B: quantity. Keep it numeric/readable without currency formatting.
+  if (columnIndex === 1) {
+    const quantity = Number(value);
+    if (!isNaN(quantity)) {
+      return quantity.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    }
+    return String(value);
+  }
+
+  // Columns E-H are monetary values. Force two decimals to avoid
+  // JavaScript floating-point artifacts such as 241199.99999999997.
+  if (columnIndex >= 4) {
+    const amount = Number(value);
+    if (!isNaN(amount)) {
+      return amount.toFixed(2);
+    }
+  }
+
+  return String(value);
 }
