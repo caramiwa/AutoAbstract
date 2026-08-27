@@ -1,112 +1,152 @@
 function extractLowestBidsPerBidder() {
-
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sourceSheet = ss.getSheetByName('AOB - As Calculated');
-if (!sourceSheet) {
-  throw new Error('Sheet "AOB - As Calculated" not found. Please verify the sheet name.');
-}
+  const ui = SpreadsheetApp.getUi();
+  const sourceSheetName = 'AOB - As Calculated';
+  const sourceSheet = ss.getSheetByName(sourceSheetName);
 
-
-  // Check if the source sheet exists
   if (!sourceSheet) {
-    SpreadsheetApp.getUi().alert(
-      'Error: "AOB - As Calculated" sheet does not exist.\n\nPlease generate the calculated AOB first by duplicating the As Read sheet and removing disqualified bidders.'
+    ui.alert(
+      `Error: "${sourceSheetName}" sheet does not exist.\n\n` +
+      'Please generate the calculated AOB first.'
     );
-    return; // Stop execution
+    return null;
   }
 
-  const sourceData = sourceSheet.getDataRange().getValues();
+  const data = sourceSheet.getDataRange().getValues();
+  if (data.length < 2) {
+    ui.alert(`No bid data found in "${sourceSheetName}".`);
+    return null;
+  }
 
-  // Get header row and bidder names
-  const headers = sourceData[0];
-  const bidderNames = headers.slice(6); // Assumes bidders start from column 7 (index 6)
-  
-  deleteBidderSheets(bidderNames);
+  const headers = data[0];
+  const bidderNames = headers.slice(6);
 
-  // Track which bidders have valid sheets
-  const bidderSheets = {};
+  // Remove previously generated bidder sheets before rebuilding them.
+  deleteBidderSheetsSA();
 
+  // Build the LCB result first, then write each bidder's complete result in one batch.
   const lowestBidsPerBidder = {};
 
-  // Process each row from the source sheet
-  sourceData.slice(1).forEach(row => {
+  data.slice(1).forEach(row => {
     const itemNo = row[0];
-    const totalQuantity = row[1];
+    const totalQuantity = toNumber(row[1]);
     const unit = row[2];
     const itemDescription = row[3];
-    const unitCost = parseFloat(row[4]);
+    const unitCost = toNumber(row[4]);
     const totalCost = totalQuantity * unitCost;
 
-    // Find the lowest bid for the item
-    let lowestBid = null;
-    let lowestBidderIndex = -1;
+    if (isNaN(unitCost)) return;
+
+    // Only bids at or below the Unit Cost are eligible, consistent with Bid Ranking.
+    const eligibleBids = [];
 
     for (let j = 6; j < row.length; j++) {
-      const bidPrice = parseFloat(row[j]);
-      if (!isNaN(bidPrice)) {
-        if (lowestBid === null || bidPrice < lowestBid) {
-          lowestBid = bidPrice;
-          lowestBidderIndex = j - 6;
-        }
+      const bidPrice = toNumber(row[j]);
+
+      if (!isNaN(bidPrice) && bidPrice <= unitCost) {
+        eligibleBids.push({
+          bidderName: bidderNames[j - 6],
+          bidPrice: bidPrice
+        });
       }
     }
 
-    // If a valid lowest bid was found, create or use the corresponding bidder's sheet
-    if (lowestBidderIndex !== -1) {
+    if (eligibleBids.length === 0) return;
 
-      const bidderName = bidderNames[lowestBidderIndex];
+    // Find the lowest eligible bid.
+    const lowestBid = Math.min(...eligibleBids.map(bid => bid.bidPrice));
+
+    // IMPORTANT: retain ALL bidders whose bid equals the lowest bid.
+    const tiedLowestBids = eligibleBids.filter(
+      bid => bid.bidPrice === lowestBid
+    );
+
+    tiedLowestBids.forEach(({ bidderName, bidPrice }) => {
+      if (!bidderName) return;
+
       if (!lowestBidsPerBidder[bidderName]) {
         lowestBidsPerBidder[bidderName] = [];
       }
 
       lowestBidsPerBidder[bidderName].push({
-        itemNo,
-        itemDescription,
-        unitCost,
-        bidPrice: lowestBid
+        itemNo: itemNo,
+        totalQuantity: totalQuantity,
+        unit: unit,
+        itemDescription: itemDescription,
+        unitCost: unitCost,
+        totalCost: totalCost,
+        bidPrice: bidPrice,
+        totalBidPrice: totalQuantity * bidPrice
       });
-
-
-      if (!bidderSheets[bidderName]) {
-        let bidderSheet = ss.getSheetByName(bidderName);
-        if (bidderSheet) {
-          bidderSheet.clear(); // Clear if exists
-        } else {
-          bidderSheet = ss.insertSheet(bidderName); // Create new if doesn't exist
-        }
-        // Set headers for each bidder sheet
-        bidderSheet.appendRow(['ITEM NO', 'TOTAL QUANTITY', 'UNIT', 'ITEM DESCRIPTION', 'UNIT COST', 'TOTAL COST', 'BID PRICE', 'TOTAL BID PRICE']);
-        formatHeader(bidderSheet);
-        bidderSheets[bidderName] = bidderSheet;
-      }
-
-      const totalBidPrice = totalQuantity * lowestBid;
-      const bidderSheet = bidderSheets[bidderName];
-      bidderSheet.appendRow([itemNo, totalQuantity, unit, itemDescription, unitCost.toFixed(2), totalCost.toFixed(2), lowestBid.toFixed(2), totalBidPrice.toFixed(2)]);
-    }
+    });
   });
 
-  // Adjust column widths and apply accounting format
-  for (const bidder in bidderSheets) {
-    const sheet = bidderSheets[bidder];
-    sheet.autoResizeColumns(1, 3); // Adjust ITEM NO, TOTAL QUANTITY, UNIT
-    sheet.setColumnWidth(4, 300); // ITEM DESCRIPTION column width
-    sheet.getRange('D:D').setWrap(true); // Wrap text in ITEM DESCRIPTION
-    sheet.autoResizeColumns(5, 8); // Adjust UNIT COST, TOTAL COST, BID PRICE, TOTAL BID PRICE
-    sheet.getRange('E:H').setNumberFormat('#,##0.00_);(#,##0.00)'); // Accounting format
-    applyBorders(sheet);
-  }
+  // Create one sheet per bidder represented in the LCB result.
+  Object.keys(lowestBidsPerBidder).forEach(bidderName => {
+    const sheet = ss.insertSheet(bidderName);
+    const rows = lowestBidsPerBidder[bidderName];
+
+    const output = [[
+      'ITEM NO',
+      'TOTAL QUANTITY',
+      'UNIT',
+      'ITEM DESCRIPTION',
+      'UNIT COST',
+      'TOTAL COST',
+      'BID PRICE',
+      'TOTAL BID PRICE'
+    ]];
+
+    rows.forEach(item => {
+      output.push([
+        item.itemNo,
+        item.totalQuantity,
+        item.unit,
+        item.itemDescription,
+        item.unitCost,
+        item.totalCost,
+        item.bidPrice,
+        item.totalBidPrice
+      ]);
+    });
+
+    sheet.getRange(1, 1, output.length, output[0].length).setValues(output);
+    formatBidderSheet(sheet);
+  });
+
   return lowestBidsPerBidder;
-
 }
 
-function formatHeader(sheet) {
-  const headerRange = sheet.getRange(1, 1, 1, 8);
-  headerRange.setFontWeight('bold');
-  headerRange.setHorizontalAlignment('center');
+function toNumber(value) {
+  if (typeof value === 'number') return value;
+  if (value === null || value === '') return NaN;
+
+  const parsed = parseFloat(String(value).replace(/,/g, ''));
+  return isNaN(parsed) ? NaN : parsed;
 }
 
-function applyBorders(sheet) {
-  const range = sheet.getDataRange();
-  range.setBorder(true, true, true, true, true, true);
+function formatBidderSheet(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+
+  if (lastRow === 0 || lastColumn === 0) return;
+
+  const headerRange = sheet.getRange(1, 1, 1, lastColumn);
+  headerRange
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center');
+
+  sheet.autoResizeColumns(1, 3);
+  sheet.setColumnWidth(4, 300);
+  sheet.getRange('D:D').setWrap(true);
+  sheet.autoResizeColumns(5, 8);
+
+  if (lastRow > 1) {
+    sheet.getRange(2, 2, lastRow - 1, 1).setNumberFormat('#,##0.##');
+    sheet.getRange(2, 5, lastRow - 1, 4)
+      .setNumberFormat('#,##0.00_);(#,##0.00)');
+  }
+
+  sheet.getDataRange().setBorder(true, true, true, true, true, true);
+  sheet.setFrozenRows(1);
 }
