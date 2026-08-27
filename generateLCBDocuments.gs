@@ -48,7 +48,9 @@ function generateLCBDocuments() {
   });
 
   ui.alert(
-    `LCB documents generated successfully.\n\n${generatedFiles.length} document(s) created.`
+    `LCB documents generated successfully.\n\n` +
+    `${generatedFiles.length} document(s) created.\n\n` +
+    `Notices of LCB folder:\n${folder.getUrl()}`
   );
 }
 
