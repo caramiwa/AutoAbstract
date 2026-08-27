@@ -47,11 +47,35 @@ function generateLCBDocuments() {
     generatedFiles.push(fileName);
   });
 
-  ui.alert(
-    `LCB documents generated successfully.\n\n` +
-    `${generatedFiles.length} document(s) created.\n\n` +
-    `Notices of LCB folder:\n${folder.getUrl()}`
-  );
+  showLCBFolderDialog(generatedFiles.length, folder.getUrl());
+}
+
+function showLCBFolderDialog(documentCount, folderUrl) {
+  const html = HtmlService.createHtmlOutput(`
+    <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+      <div style="font-size: 18px; font-weight: bold; margin-bottom: 12px;">
+        LCB documents generated successfully.
+      </div>
+      <div style="margin-bottom: 20px;">
+        ${documentCount} document(s) created.
+      </div>
+      <a href="${folderUrl}" target="_blank"
+         style="display: inline-block; padding: 10px 18px; background: #1a73e8;
+                color: white; text-decoration: none; border-radius: 4px;">
+        Open Notices of LCB Folder
+      </a>
+      <div style="margin-top: 16px;">
+        <button onclick="google.script.host.close()"
+                style="padding: 7px 18px; cursor: pointer;">
+          Close
+        </button>
+      </div>
+    </div>
+  `)
+    .setWidth(420)
+    .setHeight(230);
+
+  SpreadsheetApp.getUi().showModalDialog(html, 'AutoAbstract');
 }
 
 function getBidderNamesFromSource() {
@@ -78,10 +102,7 @@ function copyAndFillLCBTemplate(templateId, bidderName, data) {
   const doc = openDocumentWithRetry(copy.getId());
   const body = doc.getBody();
 
-  // Replace only the dynamic bidder placeholder; all template formatting remains intact.
   replaceTextIfFound(body, '{{BiddersName}}', bidderName);
-
-  // Replace the BidTable placeholder with the exact LCB result from the bidder sheet.
   insertLCBTableAtPlaceholder(body, data);
 
   doc.saveAndClose();
@@ -124,12 +145,8 @@ function insertLCBTableAtPlaceholder(body, data) {
   const parent = textElement.getParent();
   const index = body.getChildIndex(parent);
 
-  // Remove only the paragraph containing {{BidTable}}.
-  // Everything else in the template remains untouched.
   body.removeChild(parent);
 
-  // Use the bidder sheet result exactly as supplied by extractLowestBidsPerBidder().
-  // No ranking or filtering is performed here, so tied LCB items are preserved.
   const tableData = data.map(row =>
     row.map(value => value === null || value === undefined ? '' : String(value))
   );
