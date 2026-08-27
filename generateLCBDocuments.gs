@@ -2,7 +2,7 @@ function generateLCBDocuments() {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const projectTitle = 'Notices of LCB';
-  const templateId = '1M9iQu_McK1p9hV1ejcVYZb93TRhs0UWARfYaA2GlOnQ';
+  const templateId = '1NdyOfCEyiqTvKnHBgHpQiYcWbXhD8imqs8S3U3voHik';
 
   const bidderNames = getBidderNamesFromSource();
   if (bidderNames.length === 0) {
@@ -104,6 +104,7 @@ function copyAndFillLCBTemplate(templateId, bidderName, data) {
 
   replaceTextIfFound(body, '{{BiddersName}}', bidderName);
   insertLCBTableAtPlaceholder(body, data);
+  replaceFooterPlaceholder(doc, '{{BiddersName}}', bidderName);
 
   doc.saveAndClose();
   return copy.getId();
@@ -130,6 +131,17 @@ function replaceTextIfFound(body, searchText, replacement) {
   if (!match) return false;
 
   match.getElement().asText().replaceText(searchText, replacement);
+  return true;
+}
+
+function replaceFooterPlaceholder(doc, placeholder, replacement) {
+  const footer = doc.getFooter();
+  if (!footer) return false;
+
+  const match = footer.findText(placeholder);
+  if (!match) return false;
+
+  match.getElement().asText().replaceText(placeholder, replacement);
   return true;
 }
 
