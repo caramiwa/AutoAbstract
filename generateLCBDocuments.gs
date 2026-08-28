@@ -210,14 +210,34 @@ function replaceFooterPlaceholder(doc, placeholder, replacement) {
   const footer = doc.getFooter();
   if (!footer) return false;
 
-  // Google Docs findText/replaceText use regular expressions.
-  // Escape the placeholder so the literal {{BiddersName}} is matched.
+  const table = findFirstTableInFooter_(footer);
+  if (!table) return false;
+
+  // The LCB template places {{BiddersName}} in Row 1, Column 1
+  // (zero-based: row 0, column 0) of the footer table.
+  if (table.getNumRows() < 1 || table.getRow(0).getNumCells() < 1) {
+    return false;
+  }
+
+  const cell = table.getCell(0, 0);
   const escapedPlaceholder = escapeRegExp_(placeholder);
-  const match = footer.findText(escapedPlaceholder);
+
+  const match = cell.findText(escapedPlaceholder);
   if (!match) return false;
 
   match.getElement().asText().replaceText(escapedPlaceholder, replacement);
   return true;
+}
+
+function findFirstTableInFooter_(footer) {
+  for (let i = 0; i < footer.getNumChildren(); i++) {
+    const child = footer.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.TABLE) {
+      return child.asTable();
+    }
+  }
+
+  return null;
 }
 
 function escapeRegExp_(text) {
