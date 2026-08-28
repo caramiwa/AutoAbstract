@@ -1,8 +1,38 @@
 function generateLCBDocuments() {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const projectTitle = 'Notices of LCB';
-  const templateId = '1M9iQu_McK1p9hV1ejcVYZb93TRhs0UWARfYaA2GlOnQ';
+
+  const inputs = promptForLCBResources(ui);
+  if (!inputs) return;
+
+  const templateId = extractGoogleId(inputs.templateUrl, 'document');
+  const folderId = extractGoogleId(inputs.folderUrl, 'folder');
+
+  if (!templateId) {
+    ui.alert('Invalid Notice Template URL. Please paste the complete Google Docs URL.');
+    return;
+  }
+
+  if (!folderId) {
+    ui.alert('Invalid destination Folder URL. Please paste the complete Google Drive folder URL.');
+    return;
+  }
+
+  let template;
+  let folder;
+
+  try {
+    template = DriveApp.getFileById(templateId);
+    if (template.getMimeType() !== MimeType.GOOGLE_DOCS) {
+      ui.alert('The selected Notice Template is not a Google Docs document.');
+      return;
+    }
+
+    folder = DriveApp.getFolderById(folderId);
+  } catch (error) {
+    ui.alert('Unable to access the template or destination folder. Please check the URLs and your access permissions.');
+    return;
+  }
 
   const bidderNames = getBidderNamesFromSource();
   if (bidderNames.length === 0) {
@@ -19,7 +49,6 @@ function generateLCBDocuments() {
     return;
   }
 
-  const folder = getOrCreateProjectFolder(projectTitle);
   const generatedFiles = [];
 
   bidderSheets.forEach(sheet => {
@@ -47,11 +76,83 @@ function generateLCBDocuments() {
     generatedFiles.push(fileName);
   });
 
-  ui.alert(
-    `LCB documents generated successfully.\n\n` +
-    `${generatedFiles.length} document(s) created.\n\n` +
-    `Notices of LCB folder:\n${folder.getUrl()}`
+  showLCBFolderDialog(generatedFiles.length, folder.getUrl());
+}
+
+function promptForLCBResources(ui) {
+  const templateResponse = ui.prompt(
+    'Prepare Notice of LCB',
+    'Paste the Google Docs URL of the Notice Template:',
+    ui.ButtonSet.OK_CANCEL
   );
+
+  if (templateResponse.getSelectedButton() !== ui.Button.OK) return null;
+
+  const templateUrl = templateResponse.getResponseText().trim();
+  if (!templateUrl) {
+    ui.alert('No Notice Template URL was provided.');
+    return null;
+  }
+
+  const folderResponse = ui.prompt(
+    'Prepare Notice of LCB',
+    'Paste the Google Drive URL of the destination folder:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (folderResponse.getSelectedButton() !== ui.Button.OK) return null;
+
+  const folderUrl = folderResponse.getResponseText().trim();
+  if (!folderUrl) {
+    ui.alert('No destination Folder URL was provided.');
+    return null;
+  }
+
+  return { templateUrl, folderUrl };
+}
+
+function extractGoogleId(url, type) {
+  const text = String(url || '').trim();
+
+  if (type === 'document') {
+    const match = text.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+    return match ? match[1] : null;
+  }
+
+  if (type === 'folder') {
+    const match = text.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    return match ? match[1] : null;
+  }
+
+  return null;
+}
+
+function showLCBFolderDialog(documentCount, folderUrl) {
+  const html = HtmlService.createHtmlOutput(`
+    <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+      <div style="font-size: 18px; font-weight: bold; margin-bottom: 12px;">
+        LCB documents generated successfully.
+      </div>
+      <div style="margin-bottom: 20px;">
+        ${documentCount} document(s) created.
+      </div>
+      <a href="${folderUrl}" target="_blank"
+         style="display: inline-block; padding: 10px 18px; background: #1a73e8;
+                color: white; text-decoration: none; border-radius: 4px;">
+        Open Notices of LCB Folder
+      </a>
+      <div style="margin-top: 16px;">
+        <button onclick="google.script.host.close()"
+                style="padding: 7px 18px; cursor: pointer;">
+          Close
+        </button>
+      </div>
+    </div>
+  `)
+    .setWidth(420)
+    .setHeight(230);
+
+  SpreadsheetApp.getUi().showModalDialog(html, 'AutoAbstract');
 }
 
 function getBidderNamesFromSource() {
@@ -67,22 +168,15 @@ function getBidderNamesFromSource() {
     .filter(name => name !== '');
 }
 
-function getOrCreateProjectFolder(projectTitle) {
-  const folders = DriveApp.getFoldersByName(projectTitle);
-  return folders.hasNext() ? folders.next() : DriveApp.createFolder(projectTitle);
-}
-
 function copyAndFillLCBTemplate(templateId, bidderName, data) {
   const template = DriveApp.getFileById(templateId);
   const copy = template.makeCopy();
   const doc = openDocumentWithRetry(copy.getId());
   const body = doc.getBody();
 
-  // Replace only the dynamic bidder placeholder; all template formatting remains intact.
   replaceTextIfFound(body, '{{BiddersName}}', bidderName);
-
-  // Replace the BidTable placeholder with the exact LCB result from the bidder sheet.
   insertLCBTableAtPlaceholder(body, data);
+  replaceFooterPlaceholder(doc, '{{BiddersName}}', bidderName);
 
   doc.saveAndClose();
   return copy.getId();
@@ -112,6 +206,36 @@ function replaceTextIfFound(body, searchText, replacement) {
   return true;
 }
 
+function replaceFooterPlaceholder(doc, placeholder, replacement) {
+  const footer = doc.getFooter();
+  if (!footer) return false;
+
+  return replacePlaceholderInContainer(footer, placeholder, replacement);
+}
+
+function replacePlaceholderInContainer(container, placeholder, replacement) {
+  let replaced = false;
+
+  for (let i = 0; i < container.getNumChildren(); i++) {
+    const child = container.getChild(i);
+    const type = child.getType();
+
+    if (type === DocumentApp.ElementType.TEXT) {
+      const text = child.asText();
+      if (text.getText().indexOf(placeholder) !== -1) {
+        text.replaceText(placeholder, replacement);
+        replaced = true;
+      }
+    } else if (child.getNumChildren && child.getNumChildren() > 0) {
+      if (replacePlaceholderInContainer(child, placeholder, replacement)) {
+        replaced = true;
+      }
+    }
+  }
+
+  return replaced;
+}
+
 function insertLCBTableAtPlaceholder(body, data) {
   const placeholder = '{{BidTable}}';
   const match = body.findText(placeholder);
@@ -124,15 +248,39 @@ function insertLCBTableAtPlaceholder(body, data) {
   const parent = textElement.getParent();
   const index = body.getChildIndex(parent);
 
-  // Remove only the paragraph containing {{BidTable}}.
-  // Everything else in the template remains untouched.
   body.removeChild(parent);
 
-  // Use the bidder sheet result exactly as supplied by extractLowestBidsPerBidder().
-  // No ranking or filtering is performed here, so tied LCB items are preserved.
-  const tableData = data.map(row =>
-    row.map(value => value === null || value === undefined ? '' : String(value))
+  const tableData = data.map((row, rowIndex) =>
+    row.map((value, columnIndex) =>
+      formatLCBDocumentValue(value, columnIndex, rowIndex)
+    )
   );
 
   body.insertTable(index, tableData);
+}
+
+function formatLCBDocumentValue(value, columnIndex, rowIndex) {
+  if (value === null || value === undefined) return '';
+
+  if (rowIndex === 0) return String(value);
+
+  if (columnIndex === 1) {
+    const quantity = Number(value);
+    if (!isNaN(quantity)) {
+      return quantity.toLocaleString('en-PH', { maximumFractionDigits: 2 });
+    }
+    return String(value);
+  }
+
+  if (columnIndex >= 4 && columnIndex <= 7) {
+    const amount = Number(value);
+    if (!isNaN(amount)) {
+      return '₱' + amount.toLocaleString('en-PH', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+  }
+
+  return String(value);
 }
