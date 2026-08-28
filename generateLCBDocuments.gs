@@ -210,14 +210,18 @@ function replaceFooterPlaceholder(doc, placeholder, replacement) {
   const footer = doc.getFooter();
   if (!footer) return false;
 
-  // The placeholder is in the footer's text. Search the footer directly,
-  // then replace only the matched text so the footer's existing formatting
-  // is preserved.
-  const match = footer.findText(placeholder);
+  // Google Docs findText/replaceText use regular expressions.
+  // Escape the placeholder so the literal {{BiddersName}} is matched.
+  const escapedPlaceholder = escapeRegExp_(placeholder);
+  const match = footer.findText(escapedPlaceholder);
   if (!match) return false;
 
-  match.getElement().asText().replaceText(placeholder, replacement);
+  match.getElement().asText().replaceText(escapedPlaceholder, replacement);
   return true;
+}
+
+function escapeRegExp_(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function insertLCBTableAtPlaceholder(body, data) {
