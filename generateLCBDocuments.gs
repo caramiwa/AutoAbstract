@@ -210,30 +210,14 @@ function replaceFooterPlaceholder(doc, placeholder, replacement) {
   const footer = doc.getFooter();
   if (!footer) return false;
 
-  return replacePlaceholderInContainer(footer, placeholder, replacement);
-}
+  // The placeholder is in the footer's text. Search the footer directly,
+  // then replace only the matched text so the footer's existing formatting
+  // is preserved.
+  const match = footer.findText(placeholder);
+  if (!match) return false;
 
-function replacePlaceholderInContainer(container, placeholder, replacement) {
-  let replaced = false;
-
-  for (let i = 0; i < container.getNumChildren(); i++) {
-    const child = container.getChild(i);
-    const type = child.getType();
-
-    if (type === DocumentApp.ElementType.TEXT) {
-      const text = child.asText();
-      if (text.getText().indexOf(placeholder) !== -1) {
-        text.replaceText(placeholder, replacement);
-        replaced = true;
-      }
-    } else if (child.getNumChildren && child.getNumChildren() > 0) {
-      if (replacePlaceholderInContainer(child, placeholder, replacement)) {
-        replaced = true;
-      }
-    }
-  }
-
-  return replaced;
+  match.getElement().asText().replaceText(placeholder, replacement);
+  return true;
 }
 
 function insertLCBTableAtPlaceholder(body, data) {
